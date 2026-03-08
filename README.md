@@ -1,3 +1,7 @@
+# Notice:
+
+This project is a continuation of the concept introduced by [always-on-memory-agent](https://github.com/GoogleCloudPlatform/generative-ai/tree/main/gemini/agents/always-on-memory-agent). All credit goes to [Shubhamsaboo](https://github.com/Shubhamsaboo).
+
 <p align="center">
   <img src="docs/gemini_flash_lite_agent_banner.jpeg" alt="Always-On Agent Memory Layer" width="100%">
 </p>

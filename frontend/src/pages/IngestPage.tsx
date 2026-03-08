@@ -1,13 +1,9 @@
 import { useState, useEffect, useRef, type DragEvent } from 'react'
-import { fetchDatasources, fetchSupportedFormats, ingestText, uploadFile, type Datasource } from '@/lib/api'
+import { fetchDatasources, fetchSupportedFormats, uploadFile, type Datasource } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, X } from 'lucide-react'
-
-type MessageType = 'success' | 'error'
-interface Message { type: MessageType; text: string }
+import { Upload, CheckCircle, AlertCircle, Loader2, X } from 'lucide-react'
 
 type FileStatus = 'pending' | 'uploading' | 'done' | 'error'
 interface FileEntry { file: File; status: FileStatus; message?: string }
@@ -15,10 +11,6 @@ interface FileEntry { file: File; status: FileStatus; message?: string }
 export function IngestPage() {
   const [datasources, setDatasources] = useState<Datasource[]>([])
   const [selectedDs, setSelectedDs] = useState<string>('')
-  const [text, setText] = useState('')
-  const [textSource, setTextSource] = useState('')
-  const [textMessage, setTextMessage] = useState<Message | null>(null)
-  const [textLoading, setTextLoading] = useState(false)
 
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([])
   const [fileLoading, setFileLoading] = useState(false)
@@ -60,29 +52,6 @@ export function IngestPage() {
       .catch(() => {/* silently fail */})
   }, [selectedDs])
 
-  const handleIngestText = async () => {
-    if (!selectedDs) {
-      setTextMessage({ type: 'error', text: 'Please select a datasource' })
-      return
-    }
-    if (!text.trim()) {
-      setTextMessage({ type: 'error', text: 'Please enter some text to ingest' })
-      return
-    }
-    setTextLoading(true)
-    setTextMessage(null)
-    try {
-      const result = await ingestText(selectedDs, text, textSource || undefined)
-      setTextMessage({ type: 'success', text: result.response ?? 'Text ingested successfully' })
-      setText('')
-      setTextSource('')
-    } catch (err) {
-      setTextMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to ingest text' })
-    } finally {
-      setTextLoading(false)
-    }
-  }
-
   const handleFileUpload = async () => {
     if (!selectedDs) return
     const pending = fileEntries.filter((e) => e.status === 'pending')
@@ -123,29 +92,6 @@ export function IngestPage() {
 
   const handleDragLeave = () => setIsDragOver(false)
 
-  const renderMessage = (msg: Message | null) => {
-    if (!msg) return null
-    const isSuccess = msg.type === 'success'
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '8px',
-          padding: '12px',
-          borderRadius: '6px',
-          fontSize: '14px',
-          backgroundColor: isSuccess ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-          border: `1px solid ${isSuccess ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-          color: isSuccess ? '#10B981' : '#ef4444',
-        }}
-      >
-        {isSuccess ? <CheckCircle size={16} style={{ marginTop: '1px', flexShrink: 0 }} /> : <AlertCircle size={16} style={{ marginTop: '1px', flexShrink: 0 }} />}
-        {msg.text}
-      </div>
-    )
-  }
-
   const dsSelector = (
     <div>
       <label style={{ fontSize: '13px', color: '#8B949E', marginBottom: '6px', display: 'block' }}>
@@ -171,64 +117,11 @@ export function IngestPage() {
       <div style={{ marginBottom: '32px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#e6edf3', margin: 0 }}>Ingest</h1>
         <p style={{ fontSize: '14px', color: '#8B949E', marginTop: '4px' }}>
-          Add text or files to a datasource memory store
+          Upload files to a datasource memory store
         </p>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        {/* Text ingestion */}
-        <Card>
-          <CardHeader>
-            <CardTitle style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileText size={18} style={{ color: '#7C3AED' }} />
-              Text Ingestion
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {dsSelector}
-              <div>
-                <label style={{ fontSize: '13px', color: '#8B949E', marginBottom: '6px', display: 'block' }}>
-                  Source (optional)
-                </label>
-                <input
-                  type="text"
-                  value={textSource}
-                  onChange={(e) => setTextSource(e.target.value)}
-                  placeholder="e.g. meeting-notes, article-url"
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#0D1117',
-                    border: '1px solid #21262D',
-                    borderRadius: '6px',
-                    color: '#e6edf3',
-                    fontSize: '14px',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '13px', color: '#8B949E', marginBottom: '6px', display: 'block' }}>
-                  Text
-                </label>
-                <Textarea
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="Paste text to ingest into memory..."
-                  style={{ minHeight: '140px' }}
-                />
-              </div>
-              {renderMessage(textMessage)}
-              <Button onClick={() => void handleIngestText()} disabled={textLoading} style={{ alignSelf: 'flex-start' }}>
-                {textLoading ? <><Loader2 size={16} className="animate-spin" /> Ingesting...</> : 'Ingest'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* File upload */}
         <Card>
           <CardHeader>
             <CardTitle style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

@@ -9,10 +9,8 @@ from memento.db import (
     ALL_SUPPORTED,
     MEDIA_EXTENSIONS,
     TEXT_EXTENSIONS,
-    delete_memories_by_source_file,
     get_db,
     get_memory_stats,
-    tag_memories_with_source_file,
     validate_datasource_name,
 )
 
@@ -65,13 +63,15 @@ async def watch_datasource(
                         continue
                     is_update = True
                     log.info(f"File modified since last ingestion [{datasource}]: {f.name}")
-                    db.execute("DELETE FROM processed_files WHERE path = ?", (str(f),))
-                    db.commit()
 
                 source_file = str(f)
 
                 if is_update:
-                    deleted = delete_memories_by_source_file(datasource, source_file)
+                    db.execute("DELETE FROM processed_files WHERE path = ?", (str(f),))
+                    deleted = db.execute(
+                        "DELETE FROM memories WHERE source_file = ?", (source_file,)
+                    ).rowcount
+                    db.commit()
                     log.info(f"Replaced {deleted} old memory/memories for {f.name} [{datasource}]")
 
                 stats_before = get_memory_stats(datasource)
@@ -95,12 +95,15 @@ async def watch_datasource(
                         )
                         continue
 
-                    tag_memories_with_source_file(datasource, f.name, source_file)
-
                     db.execute(
                         "INSERT INTO processed_files (path, processed_at, file_mtime) "
                         "VALUES (?, ?, ?)",
                         (str(f), datetime.now(timezone.utc).isoformat(), mtime),
+                    )
+                    db.execute(
+                        "UPDATE memories SET source_file = ? "
+                        "WHERE source = ? AND source_file IS NULL",
+                        (source_file, f.name),
                     )
                     db.commit()
                 except Exception as file_err:

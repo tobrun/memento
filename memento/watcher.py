@@ -9,8 +9,10 @@ from memento.db import (
     ALL_SUPPORTED,
     MEDIA_EXTENSIONS,
     TEXT_EXTENSIONS,
+    delete_memories_by_source_file,
     get_db,
     get_memory_stats,
+    tag_memories_with_source_file,
     validate_datasource_name,
 )
 
@@ -56,14 +58,21 @@ async def watch_datasource(
                     "SELECT processed_at, file_mtime FROM processed_files WHERE path = ?",
                     (str(f),),
                 ).fetchone()
+                is_update = False
                 if row:
                     stored_mtime = row[1]
                     if stored_mtime is not None and mtime <= stored_mtime:
                         continue
-                    # File was modified since last processing — re-process
+                    is_update = True
                     log.info(f"File modified since last ingestion [{datasource}]: {f.name}")
                     db.execute("DELETE FROM processed_files WHERE path = ?", (str(f),))
                     db.commit()
+
+                source_file = str(f)
+
+                if is_update:
+                    deleted = delete_memories_by_source_file(datasource, source_file)
+                    log.info(f"Replaced {deleted} old memory/memories for {f.name} [{datasource}]")
 
                 stats_before = get_memory_stats(datasource)
                 count_before = stats_before["total_memories"]
@@ -85,6 +94,8 @@ async def watch_datasource(
                             "will retry on next cycle"
                         )
                         continue
+
+                    tag_memories_with_source_file(datasource, f.name, source_file)
 
                     db.execute(
                         "INSERT INTO processed_files (path, processed_at, file_mtime) "

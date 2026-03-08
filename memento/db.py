@@ -94,6 +94,7 @@ _SCHEMA = """
     CREATE TABLE IF NOT EXISTS memories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         source TEXT NOT NULL DEFAULT '',
+        source_file TEXT,
         raw_text TEXT NOT NULL,
         summary TEXT NOT NULL,
         entities TEXT NOT NULL DEFAULT '[]',
@@ -123,10 +124,13 @@ def get_db(datasource: str) -> sqlite3.Connection:
     db = sqlite3.connect(str(_db_path(datasource)))
     db.row_factory = sqlite3.Row
     db.executescript(_SCHEMA)
-    # Migration: add file_mtime column if missing (pre-existing databases)
-    cols = {row[1] for row in db.execute("PRAGMA table_info(processed_files)").fetchall()}
-    if "file_mtime" not in cols:
+    # Migrations for pre-existing databases
+    pf_cols = {row[1] for row in db.execute("PRAGMA table_info(processed_files)").fetchall()}
+    if "file_mtime" not in pf_cols:
         db.execute("ALTER TABLE processed_files ADD COLUMN file_mtime REAL")
+    mem_cols = {row[1] for row in db.execute("PRAGMA table_info(memories)").fetchall()}
+    if "source_file" not in mem_cols:
+        db.execute("ALTER TABLE memories ADD COLUMN source_file TEXT")
     return db
 
 
@@ -137,6 +141,7 @@ def _convert_row(r: sqlite3.Row) -> dict:
     return {
         "id": r["id"],
         "source": r["source"],
+        "source_file": r["source_file"],
         "summary": r["summary"],
         "raw_text": r["raw_text"],
         "entities": json.loads(r["entities"]),
@@ -159,6 +164,7 @@ def store_memory(
     topics: list[str],
     importance: float,
     source: str = "",
+    source_file: str | None = None,
 ) -> dict:
     """Store a processed memory in the database.
 
@@ -170,6 +176,7 @@ def store_memory(
         topics: 2-4 topic tags.
         importance: Float 0.0 to 1.0 indicating importance.
         source: Where this memory came from (filename, URL, etc).
+        source_file: Absolute path of the ingested file (used for dedup on re-ingestion).
 
     Returns:
         dict with memory_id and confirmation.
@@ -177,15 +184,58 @@ def store_memory(
     db = get_db(datasource)
     now = datetime.now(timezone.utc).isoformat()
     cursor = db.execute(
-        """INSERT INTO memories (source, raw_text, summary, entities, topics, importance, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (source, raw_text, summary, json.dumps(entities), json.dumps(topics), importance, now),
+        """INSERT INTO memories
+           (source, source_file, raw_text, summary, entities, topics, importance, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (source, source_file, raw_text, summary, json.dumps(entities), json.dumps(topics), importance, now),
     )
     db.commit()
     mid = cursor.lastrowid
     db.close()
     log.info(f"Stored memory #{mid} [{datasource}]: {summary[:60]}...")
     return {"memory_id": mid, "status": "stored", "summary": summary}
+
+
+def tag_memories_with_source_file(
+    datasource: str, source: str, source_file: str,
+) -> int:
+    """Set source_file on memories that match source and have no source_file yet.
+
+    Called by the watcher after the LLM agent stores a memory to link it back
+    to the originating file for future dedup.
+
+    Returns:
+        Number of rows updated.
+    """
+    db = get_db(datasource)
+    updated = db.execute(
+        "UPDATE memories SET source_file = ? WHERE source = ? AND source_file IS NULL",
+        (source_file, source),
+    ).rowcount
+    db.commit()
+    db.close()
+    return updated
+
+
+def delete_memories_by_source_file(datasource: str, source_file: str) -> int:
+    """Delete all memories originating from a specific file.
+
+    Args:
+        datasource: The datasource name.
+        source_file: The absolute file path to match against source_file column.
+
+    Returns:
+        Number of memories deleted.
+    """
+    db = get_db(datasource)
+    deleted = db.execute(
+        "DELETE FROM memories WHERE source_file = ?", (source_file,)
+    ).rowcount
+    db.commit()
+    db.close()
+    if deleted:
+        log.info(f"Deleted {deleted} memory/memories for {source_file} [{datasource}]")
+    return deleted
 
 
 def read_all_memories(datasource: str) -> dict:

@@ -225,10 +225,10 @@ export function QueryPage() {
                           #{memory.id}
                         </span>
                         <Badge
-                          variant={memory.importance >= 7 ? 'default' : memory.importance >= 4 ? 'warning' : 'secondary'}
+                          variant={memory.importance >= 0.7 ? 'default' : memory.importance >= 0.4 ? 'warning' : 'secondary'}
                           style={{ fontSize: '10px', padding: '1px 6px' }}
                         >
-                          {memory.importance}/10
+                          {Math.round(memory.importance * 10)}/10
                         </Badge>
                         {memory.consolidated && (
                           <Badge variant="success" style={{ fontSize: '10px', padding: '1px 6px' }}>

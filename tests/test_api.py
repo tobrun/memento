@@ -224,3 +224,20 @@ async def test_unknown_datasource_returns_404(client):
     """API-20: Requests to unknown datasource return 404."""
     resp = await client.get("/api/status/doesnotexist")
     assert resp.status == 404
+
+
+# ─── Importance score contract ───────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("importance", [0.0, 0.3, 0.5, 0.7, 1.0])
+async def test_importance_returned_as_zero_to_one(client, general_db, importance):
+    """API-21: importance is returned in 0.0–1.0 range (frontend multiplies by 10 for display)."""
+    store_memory("general", "raw", "summary", [], [], importance, "test")
+    resp = await client.get("/api/memories/general")
+    data = await resp.json()
+    mem = data["memories"][0]
+    assert mem["importance"] == importance
+    assert 0.0 <= mem["importance"] <= 1.0
+    # Clean up for next parametrize iteration
+    from memento.db import clear_all_memories
+    clear_all_memories("general")

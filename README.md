@@ -249,7 +249,17 @@ See [docs/deployment.md](docs/deployment.md) for running Memento as a systemd se
 
 ## Prior Work Notice
 
-Memento is a contiunation of the concept coined in [always-on-memory-agent](https://github.com/GoogleCloudPlatform/generative-ai/tree/main/gemini/agents/always-on-memory-agent). All credit for the baseline setup of this project goes to [Shubhamsaboo](https://github.com/Shubhamsaboo).
+Memento builds on the [always-on-memory-agent](https://github.com/GoogleCloudPlatform/generative-ai/tree/main/gemini/agents/always-on-memory-agent) concept by [Shubhamsaboo](https://github.com/Shubhamsaboo). The original project demonstrated a single-file agent that ingests, consolidates, and queries memories using Google ADK.
+
+Memento extends this with:
+- **Multi-datasource isolation** — each datasource gets its own inbox directory and SQLite database
+- **Modular package structure** — refactored from a single `agent.py` into a `memento/` Python package
+- **React web UI** — dashboard, ingest, query, and datasource management pages
+- **MCP server** — exposes datasources to AI coding agents over the network
+- **LLM backend flexibility** — supports any OpenAI-compatible endpoint via LiteLLM alongside Gemini
+- **Multimodal ingestion** — processes images, audio, video, and PDFs alongside text
+- **Cursor-based pagination** — efficient memory browsing via the API
+- **Systemd deployment** — production-ready service configuration
 
 ## License
 

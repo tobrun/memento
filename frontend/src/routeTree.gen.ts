@@ -14,6 +14,7 @@ import { Route as IngestRouteImport } from './routes/ingest'
 import { Route as DatasourcesRouteImport } from './routes/datasources'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DatasourceNameRouteImport } from './routes/datasource.$name'
 
 const QueryRoute = QueryRouteImport.update({
   id: '/query',
@@ -40,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DatasourceNameRoute = DatasourceNameRouteImport.update({
+  id: '/datasource/$name',
+  path: '/datasource/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/datasources': typeof DatasourcesRoute
   '/ingest': typeof IngestRoute
   '/query': typeof QueryRoute
+  '/datasource/$name': typeof DatasourceNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/datasources': typeof DatasourcesRoute
   '/ingest': typeof IngestRoute
   '/query': typeof QueryRoute
+  '/datasource/$name': typeof DatasourceNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,33 @@ export interface FileRoutesById {
   '/datasources': typeof DatasourcesRoute
   '/ingest': typeof IngestRoute
   '/query': typeof QueryRoute
+  '/datasource/$name': typeof DatasourceNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/datasources' | '/ingest' | '/query'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/datasources'
+    | '/ingest'
+    | '/query'
+    | '/datasource/$name'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/datasources' | '/ingest' | '/query'
-  id: '__root__' | '/' | '/dashboard' | '/datasources' | '/ingest' | '/query'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/datasources'
+    | '/ingest'
+    | '/query'
+    | '/datasource/$name'
+  id:
+    | '__root__'
+    | '/'
+    | '/dashboard'
+    | '/datasources'
+    | '/ingest'
+    | '/query'
+    | '/datasource/$name'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +105,7 @@ export interface RootRouteChildren {
   DatasourcesRoute: typeof DatasourcesRoute
   IngestRoute: typeof IngestRoute
   QueryRoute: typeof QueryRoute
+  DatasourceNameRoute: typeof DatasourceNameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/datasource/$name': {
+      id: '/datasource/$name'
+      path: '/datasource/$name'
+      fullPath: '/datasource/$name'
+      preLoaderRoute: typeof DatasourceNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   DatasourcesRoute: DatasourcesRoute,
   IngestRoute: IngestRoute,
   QueryRoute: QueryRoute,
+  DatasourceNameRoute: DatasourceNameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

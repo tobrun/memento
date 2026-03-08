@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from '@tanstack/react-router'
 import { fetchDatasources, fetchStatus, type Datasource, type StatusResponse } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -154,7 +155,16 @@ export function DashboardPage() {
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
             {statsMap.map(({ datasource, status, error }) => (
-              <Card key={datasource.name}>
+              <Link
+                key={datasource.name}
+                to="/datasource/$name"
+                params={{ name: datasource.name }}
+                style={{ textDecoration: 'none', color: 'inherit' }}
+              >
+              <Card style={{ cursor: 'pointer', transition: 'border-color 0.15s' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#7C3AED' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = '' }}
+              >
                 <CardHeader style={{ paddingBottom: '8px' }}>
                   <CardTitle style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontFamily: 'monospace', fontSize: '15px' }}>{datasource.name}</span>
@@ -197,6 +207,7 @@ export function DashboardPage() {
                   )}
                 </CardContent>
               </Card>
+              </Link>
             ))}
           </div>
         </div>

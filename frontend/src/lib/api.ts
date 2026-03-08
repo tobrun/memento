@@ -10,6 +10,7 @@ export interface Memory {
   id: number
   source: string
   source_file: string | null
+  raw_text: string
   summary: string
   entities: string[]
   topics: string[]
@@ -17,6 +18,12 @@ export interface Memory {
   connections: { linked_to: number; relationship: string }[]
   created_at: string
   consolidated: boolean
+}
+
+export interface InboxFile {
+  name: string
+  size: number
+  modified: number
 }
 
 export interface MemoriesResponse {
@@ -112,6 +119,11 @@ export async function fetchMemories(
   const query = params.toString() ? `?${params}` : ''
   const res = await fetch(`${BASE}/memories/${encodeURIComponent(datasource)}${query}`)
   return handleResponse<MemoriesResponse>(res)
+}
+
+export async function fetchFiles(datasource: string): Promise<{ files: InboxFile[] }> {
+  const res = await fetch(`${BASE}/files/${encodeURIComponent(datasource)}`)
+  return handleResponse<{ files: InboxFile[] }>(res)
 }
 
 export async function fetchStatus(datasource: string): Promise<StatusResponse> {

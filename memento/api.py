@@ -256,6 +256,26 @@ def build_http(agent: MemoryAgent, watch_path: str = "./inbox") -> web.Applicati
         """GET /api/supported-formats — list accepted file extensions."""
         return web.json_response({"extensions": sorted(ALL_SUPPORTED)})
 
+    async def handle_download(request: web.Request) -> web.Response:
+        """GET /api/download/{datasource}/{filename} — serve a file from the inbox."""
+        ds = request.match_info["datasource"]
+        filename = request.match_info["filename"]
+
+        if ds == "general":
+            file_path = Path(watch_path) / filename
+        else:
+            file_path = Path(watch_path) / ds / filename
+
+        file_path = file_path.resolve()
+        inbox_root = Path(watch_path).resolve()
+        if not str(file_path).startswith(str(inbox_root)):
+            raise web.HTTPForbidden()
+
+        if not file_path.is_file():
+            raise web.HTTPNotFound()
+
+        return web.FileResponse(file_path)
+
     # ─── Route registration ──────────────────────────────────────
 
     app.router.add_get("/api/datasources", handle_list_datasources)
@@ -270,6 +290,7 @@ def build_http(agent: MemoryAgent, watch_path: str = "./inbox") -> web.Applicati
     app.router.add_get("/api/memories/{datasource}", handle_memories)
     app.router.add_post("/api/delete/{datasource}", handle_delete)
     app.router.add_post("/api/clear/{datasource}", handle_clear)
+    app.router.add_get("/api/download/{datasource}/{filename}", handle_download)
 
     # SPA static file serving — must be registered AFTER all /api/ routes
     setup_static(app)

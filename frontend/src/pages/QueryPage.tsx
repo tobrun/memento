@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { fetchDatasources, queryMemories, fetchMemories, type Datasource, type Memory } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -6,6 +6,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Search, BookOpen, Loader2, AlertCircle } from 'lucide-react'
 import { marked } from 'marked'
+
+/** Extract memory IDs cited in the answer, e.g. [Memory 3], [Memory #12]. */
+function parseCitedIds(text: string): Set<number> {
+  const ids = new Set<number>()
+  const re = /\[Memory\s*#?(\d+)\]/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    ids.add(Number(m[1]))
+  }
+  return ids
+}
 
 export function QueryPage() {
   const [datasources, setDatasources] = useState<Datasource[]>([])
@@ -15,6 +26,7 @@ export function QueryPage() {
   const [memories, setMemories] = useState<Memory[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
     fetchDatasources()
@@ -38,6 +50,7 @@ export function QueryPage() {
     setError(null)
     setAnswer(null)
     setMemories([])
+    setShowAll(false)
 
     try {
       const [queryResult, memoriesResult] = await Promise.all([
@@ -59,9 +72,23 @@ export function QueryPage() {
     }
   }
 
-  const renderedAnswer = answer
-    ? marked.parse(answer, { async: false }) as string
-    : null
+  const { preamble, body: answerBody, citedIds } = useMemo(() => {
+    if (!answer) return { preamble: null, body: null, citedIds: new Set<number>() }
+    const html = marked.parse(answer, { async: false }) as string
+    const headingIndex = html.search(/<h[1-6][\s>]/)
+    if (headingIndex <= 0) return { preamble: null, body: html, citedIds: parseCitedIds(answer) }
+    const before = html.slice(0, headingIndex).trim()
+    // Split raw markdown at the first heading to extract only body citations
+    const mdHeadingIndex = answer.search(/^#{1,6}\s/m)
+    const bodyMd = mdHeadingIndex > 0 ? answer.slice(mdHeadingIndex) : answer
+    if (!before) return { preamble: null, body: html, citedIds: parseCitedIds(bodyMd) }
+    return { preamble: before, body: html.slice(headingIndex), citedIds: parseCitedIds(bodyMd) }
+  }, [answer])
+
+  const displayedMemories = useMemo(() => {
+    if (showAll || citedIds.size === 0) return memories
+    return memories.filter((m) => citedIds.has(m.id))
+  }, [memories, citedIds, showAll])
 
   return (
     <div style={{ padding: '32px' }}>
@@ -168,18 +195,34 @@ export function QueryPage() {
                   <span>Querying memories...</span>
                 </div>
               )}
-              {!loading && renderedAnswer && (
-                <div
-                  className="prose-content"
-                  dangerouslySetInnerHTML={{ __html: renderedAnswer }}
-                  style={{
-                    color: '#e6edf3',
-                    fontSize: '14px',
-                    lineHeight: '1.7',
-                  }}
-                />
+              {!loading && answerBody && (
+                <div className="prose-content" style={{ color: '#e6edf3', fontSize: '14px', lineHeight: '1.7' }}>
+                  {preamble && (
+                    <details style={{
+                      marginBottom: '16px',
+                      padding: '8px 12px',
+                      backgroundColor: 'rgba(124, 58, 237, 0.05)',
+                      border: '1px solid #21262D',
+                      borderRadius: '6px',
+                    }}>
+                      <summary style={{
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        color: '#8B949E',
+                        userSelect: 'none',
+                      }}>
+                        Reasoning
+                      </summary>
+                      <div
+                        dangerouslySetInnerHTML={{ __html: preamble }}
+                        style={{ marginTop: '8px', fontSize: '13px', color: '#8B949E', lineHeight: '1.6' }}
+                      />
+                    </details>
+                  )}
+                  <div dangerouslySetInnerHTML={{ __html: answerBody }} />
+                </div>
               )}
-              {!loading && !renderedAnswer && !error && (
+              {!loading && !answerBody && !error && (
                 <p style={{ color: '#8B949E', fontSize: '14px' }}>
                   Enter a question and click Search to query your memories.
                 </p>
@@ -194,10 +237,10 @@ export function QueryPage() {
             <CardHeader style={{ paddingBottom: '12px' }}>
               <CardTitle style={{ fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <BookOpen size={16} style={{ color: '#06B6D4' }} />
-                Source Memories
-                {memories.length > 0 && (
+                {showAll ? 'All Memories' : 'Cited Memories'}
+                {displayedMemories.length > 0 && (
                   <Badge variant="secondary" style={{ marginLeft: 'auto', fontSize: '11px' }}>
-                    {memories.length}
+                    {displayedMemories.length}{!showAll && memories.length > 0 ? `/${memories.length}` : ''}
                   </Badge>
                 )}
               </CardTitle>
@@ -208,42 +251,95 @@ export function QueryPage() {
                   Source memories will appear here after a query.
                 </p>
               )}
-              {memories.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '600px', overflowY: 'auto' }}>
-                  {memories.map((memory) => (
-                    <div
-                      key={memory.id}
-                      style={{
-                        padding: '10px 12px',
-                        backgroundColor: '#0D1117',
-                        border: '1px solid #21262D',
-                        borderRadius: '6px',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#7C3AED', fontWeight: 600 }}>
-                          #{memory.id}
-                        </span>
-                        <Badge
-                          variant={memory.importance >= 0.7 ? 'default' : memory.importance >= 0.4 ? 'warning' : 'secondary'}
-                          style={{ fontSize: '10px', padding: '1px 6px' }}
-                        >
-                          {Math.round(memory.importance * 10)}/10
-                        </Badge>
-                        {memory.consolidated && (
-                          <Badge variant="success" style={{ fontSize: '10px', padding: '1px 6px' }}>
-                            consolidated
+              {answer && memories.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowAll((prev) => !prev)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#7C3AED',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      padding: '0 0 8px 0',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {showAll ? 'Show cited only' : 'Show all memories'}
+                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '600px', overflowY: 'auto' }}>
+                    {displayedMemories.map((memory) => (
+                      <div
+                        key={memory.id}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#0D1117',
+                          border: '1px solid #21262D',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#7C3AED', fontWeight: 600 }}>
+                            #{memory.id}
+                          </span>
+                          <Badge
+                            variant={memory.importance >= 0.7 ? 'default' : memory.importance >= 0.4 ? 'warning' : 'secondary'}
+                            style={{ fontSize: '10px', padding: '1px 6px' }}
+                          >
+                            {Math.round(memory.importance * 10)}/10
                           </Badge>
+                          {memory.consolidated && (
+                            <Badge variant="success" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                              consolidated
+                            </Badge>
+                          )}
+                        </div>
+                        <p style={{ margin: 0, fontSize: '12px', color: '#8B949E', lineHeight: '1.5' }}>
+                          {memory.summary.length > 120
+                            ? `${memory.summary.slice(0, 120)}...`
+                            : memory.summary}
+                        </p>
+                        {memory.source && (
+                          <a
+                            href={`/api/download/${encodeURIComponent(selectedDs)}/${encodeURIComponent(memory.source)}`}
+                            download
+                            style={{
+                              display: 'inline-block',
+                              marginTop: '6px',
+                              fontSize: '11px',
+                              color: '#06B6D4',
+                              textDecoration: 'none',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline' }}
+                            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none' }}
+                          >
+                            {memory.source}
+                          </a>
                         )}
                       </div>
-                      <p style={{ margin: 0, fontSize: '12px', color: '#8B949E', lineHeight: '1.5' }}>
-                        {memory.summary.length > 120
-                          ? `${memory.summary.slice(0, 120)}...`
-                          : memory.summary}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {answer && displayedMemories.length === 0 && (
+                <p style={{ color: '#8B949E', fontSize: '13px' }}>
+                  No memory citations found in the answer.
+                  {' '}
+                  <button
+                    onClick={() => setShowAll(true)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#7C3AED',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      padding: 0,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Show all memories
+                  </button>
+                </p>
               )}
             </CardContent>
           </Card>

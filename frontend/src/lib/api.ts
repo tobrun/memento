@@ -9,6 +9,7 @@ export interface Datasource {
 export interface Memory {
   id: number
   source: string
+  source_file: string | null
   summary: string
   entities: string[]
   topics: string[]

@@ -1,0 +1,7 @@
+.env
+.venv/
+memory.db
+inbox/
+__pycache__/
+*.pyc
+databases

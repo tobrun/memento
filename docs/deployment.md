@@ -1,12 +1,11 @@
-# Deploying Memento as a systemd Service
+# Deploying agent-inbox-memory-layer as a systemd Service
 
-This guide covers running Memento as a persistent background service on Linux using systemd.
+This guide covers running the `inbox watch` daemon as a persistent background service on Linux using systemd.
 
 ## Prerequisites
 
 - Linux with systemd (Ubuntu 20.04+, Debian 11+, or equivalent)
-- Python 3.11+
-- bun (for building the frontend)
+- Python 3.10+
 - Git
 
 ## 1. Clone and install
@@ -17,21 +16,10 @@ cd memento
 
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
-## 2. Build the frontend
-
-```bash
-cd frontend
-bun install
-bun run build
-cd ..
-```
-
-This produces `frontend/dist/` which is served by the agent on port 8888.
-
-## 3. Configure
+## 2. Configure
 
 ```bash
 cp .env.example .env
@@ -44,30 +32,36 @@ Edit `.env` for your LLM backend:
 GOOGLE_API_KEY=your-gemini-api-key
 ```
 
-**Option B — Self-hosted / OpenAI-compatible**
+**Option B — Anthropic (cloud)**
+```env
+ANTHROPIC_API_KEY=your-anthropic-api-key
+MODEL=claude-sonnet-4-20250514
+```
+
+**Option C — Self-hosted / OpenAI-compatible**
 ```env
 OPENAI_API_BASE=http://localhost:11434/v1
 OPENAI_API_KEY=not-needed
 MODEL=llama3
 ```
 
-Verify the agent starts before setting up systemd:
+Verify the tool starts before setting up systemd:
 ```bash
 source .venv/bin/activate
-python -m memento
-# Should print startup logs and listen on :8888
+inbox watch ./inbox
+# Should print startup logs and begin watching
 # Ctrl+C to stop
 ```
 
-## 4. Create the systemd service
+## 3. Create the systemd service
 
-Replace `<your-user>` and `/path/to/memento` with your actual username and install path.
+Replace `<your-user>`, `/path/to/memento`, and the watched directories with your actual values.
 
-Create `/etc/systemd/system/memento.service`:
+Create `/etc/systemd/system/inbox.service`:
 
 ```ini
 [Unit]
-Description=Memento Memory Agent
+Description=agent-inbox-memory-layer
 Documentation=https://github.com/tobrun/memento
 After=network.target
 
@@ -75,12 +69,12 @@ After=network.target
 Type=simple
 User=<your-user>
 WorkingDirectory=/path/to/memento
-ExecStart=/path/to/memento/.venv/bin/python -m memento
+ExecStart=/path/to/memento/.venv/bin/inbox watch /path/to/inbox /path/to/research
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=memento
+SyslogIdentifier=inbox
 
 # Load environment from .env file
 EnvironmentFile=/path/to/memento/.env
@@ -93,14 +87,14 @@ Example with a real path (`/home/alice/memento`, user `alice`):
 
 ```ini
 [Unit]
-Description=Memento Memory Agent
+Description=agent-inbox-memory-layer
 After=network.target
 
 [Service]
 Type=simple
 User=alice
 WorkingDirectory=/home/alice/memento
-ExecStart=/home/alice/memento/.venv/bin/python -m memento
+ExecStart=/home/alice/memento/.venv/bin/inbox watch /home/alice/inbox
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=/home/alice/memento/.env
@@ -109,99 +103,64 @@ EnvironmentFile=/home/alice/memento/.env
 WantedBy=multi-user.target
 ```
 
-## 5. Enable and start
+## 4. Enable and start
 
 ```bash
 # Reload systemd to pick up the new service file
 sudo systemctl daemon-reload
 
 # Enable the service to start on boot
-sudo systemctl enable memento
+sudo systemctl enable inbox
 
 # Start the service now
-sudo systemctl start memento
+sudo systemctl start inbox
 
 # Verify it's running
-sudo systemctl status memento
+sudo systemctl status inbox
 ```
 
 Expected output:
 ```
-● memento.service - Memento Memory Agent
-     Loaded: loaded (/etc/systemd/system/memento.service; enabled)
+● inbox.service - agent-inbox-memory-layer
+     Loaded: loaded (/etc/systemd/system/inbox.service; enabled)
      Active: active (running) since ...
 ```
 
-## 6. View logs
+## 5. View logs
 
 ```bash
 # Follow logs in real time
-journalctl -u memento -f
+journalctl -u inbox -f
 
 # Show last 100 lines
-journalctl -u memento -n 100
+journalctl -u inbox -n 100
 
 # Show logs since last boot
-journalctl -u memento -b
+journalctl -u inbox -b
 ```
 
-## 7. Manage the service
+## 6. Manage the service
 
 ```bash
-sudo systemctl stop memento      # stop
-sudo systemctl restart memento   # restart
-sudo systemctl disable memento   # disable autostart
+sudo systemctl stop inbox      # stop
+sudo systemctl restart inbox   # restart
+sudo systemctl disable inbox   # disable autostart
 ```
 
-## 8. Verify
+## 7. Verify
 
-Once running, check the agent is accessible:
+Once running, check the watched directories for `AGENTS.md` and `.memento-state.json` files:
 
 ```bash
-curl http://localhost:8888/api/datasources
-# Expected: [{"name": "general", ...}]
+ls /path/to/inbox/AGENTS.md
+cat /path/to/inbox/.memento-state.json
 ```
 
-Open the web interface: `http://localhost:8888`
-
-## MCP server (optional)
-
-The MCP server runs separately. To run it as a second service, create `/etc/systemd/system/memento-mcp.service`:
-
-```ini
-[Unit]
-Description=Memento MCP Server
-After=network.target memento.service
-
-[Service]
-Type=simple
-User=<your-user>
-WorkingDirectory=/path/to/memento
-ExecStart=/path/to/memento/.venv/bin/python mcp_server.py
-Restart=on-failure
-RestartSec=5
-EnvironmentFile=/path/to/memento/.env
-
-[Install]
-WantedBy=multi-user.target
-```
+Drop a test file and watch the logs to confirm ingestion:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable memento-mcp
-sudo systemctl start memento-mcp
-```
-
-The MCP server listens on port 8889 by default. Configure it in your MCP client:
-
-```json
-{
-  "mcpServers": {
-    "memento": {
-      "url": "http://localhost:8889/mcp"
-    }
-  }
-}
+echo "Test content for ingestion" > /path/to/inbox/test-note.txt
+journalctl -u inbox -f
 ```
 
 ## Updating
@@ -210,13 +169,10 @@ The MCP server listens on port 8889 by default. Configure it in your MCP client:
 cd /path/to/memento
 git pull
 
-# Reinstall Python dependencies if requirements.txt changed
+# Reinstall if dependencies changed
 source .venv/bin/activate
-pip install -r requirements.txt
-
-# Rebuild frontend if frontend/ changed
-cd frontend && bun install && bun run build && cd ..
+pip install -e .
 
 # Restart the service
-sudo systemctl restart memento
+sudo systemctl restart inbox
 ```

@@ -11,103 +11,93 @@ pip install -r requirements.txt
 # Configure environment
 cp .env.example .env   # then edit .env
 
-# Build the frontend (required for web UI)
-cd frontend && bun install && bun run build && cd ..
+# Watch directories for new files (long-running daemon)
+inbox watch ./inbox
 
-# Run the agent (watches ./inbox, serves API + web UI on :8888)
-python -m memento
+# Watch multiple directories
+inbox watch ./inbox ./research ./notes
 
-# Run with custom options
-python -m memento --watch ./docs --port 9000 --consolidate-every 15
+# One-shot: process all pending files, then exit
+inbox ingest ./inbox
 
-# Run the MCP server (separate process, port 8889)
-python mcp_server.py
+# Show manifest stats (total files, pending, last ingestion time)
+inbox status ./inbox
 
-# Run frontend in dev mode (proxies API to :8888)
-cd frontend && bun run dev
+# Force-regenerate AGENTS.md from all files' frontmatter
+inbox reindex ./inbox
 
-# Run Python tests
+# Run tests
 pytest tests/
-
-# Run frontend tests
-cd frontend && bun run test
-
-# Query via curl (all routes under /api/)
-curl "http://localhost:8888/api/query/general?q=what+do+you+know"
-curl -X POST http://localhost:8888/api/ingest/general \
-  -H "Content-Type: application/json" \
-  -d '{"text": "some info", "source": "test"}'
-curl http://localhost:8888/api/datasources
 ```
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `GOOGLE_API_KEY` | — | Required when using Gemini. |
-| `MODEL` | `gemini-3.1-flash-lite-preview` | Model name. When using an OpenAI-compatible endpoint, use the model name on that server (e.g. `llama3`). |
-| `OPENAI_API_BASE` | — | If set, switches to an OpenAI-compatible endpoint via LiteLLM (e.g. `http://localhost:11434/v1`). `GOOGLE_API_KEY` is then not required. |
+| `MODEL` | `gemini-2.0-flash-lite` | LiteLLM model string. Any LiteLLM-compatible model works (Gemini, OpenAI, Anthropic, local via Ollama). |
+| `GOOGLE_API_KEY` | -- | Required when using Gemini models. |
+| `ANTHROPIC_API_KEY` | -- | Required when using Anthropic/Claude models. |
+| `OPENAI_API_BASE` | -- | If set, uses an OpenAI-compatible endpoint via LiteLLM (e.g. `http://localhost:11434/v1`). `GOOGLE_API_KEY` is then not required. |
 | `OPENAI_API_KEY` | `not-needed` | API key for the OpenAI-compatible endpoint. |
-| `MEMORY_DB` | `./databases` | Directory for per-datasource SQLite databases. |
-| `WATCH_DIR` | `./inbox` | Root inbox directory. Subdirectories become named datasources. |
-| `PORT` | `8888` | HTTP API + web UI port. |
-| `MCP_PORT` | `8889` | MCP server port (separate from main API). |
+| `MAX_FILE_SIZE` | `5242880` (5 MB) | Skip files larger than this (bytes). |
+
+CLI flags (`--model`, `--openai-api-base`, `--max-file-size`) override env vars. No config file.
 
 ## Architecture
 
-The system is structured as a Python package (`memento/`) plus a React frontend (`frontend/`):
+The system is a Python package (`inbox/`) providing a CLI tool (`inbox`) that watches directories, ingests files through an LLM, and maintains an `AGENTS.md` index for consumption by AI coding tools.
 
-### Python Package: `memento/`
+### Modules
 
 | Module | Purpose |
 |---|---|
-| `__main__.py` | Entry point — wires all modules, starts asyncio tasks |
-| `config.py` | Env var loading, argparse, model initialization |
-| `db.py` | SQLite schema, CRUD functions, name validation, pagination |
-| `agents.py` | ADK agent definitions (`build_agents()`), `MemoryAgent` class |
-| `api.py` | aiohttp HTTP API routes (all under `/api/`) |
-| `watcher.py` | Multi-datasource file watcher, watcher manager, consolidation loop |
-| `static.py` | Static file serving for the built SPA + SPA catch-all |
+| `__main__.py` | Entry point, Click CLI group with `watch`, `ingest`, `status`, `reindex` subcommands |
+| `config.py` | Env var loading, defaults, immutable `Config` dataclass. Resolution order: CLI override > env var > default |
+| `llm.py` | LiteLLM wrapper, prompt templates (`build_ingestion_prompt`, `build_index_prompt`), response parsing |
+| `ingest.py` | File reading (text + PDF via pymupdf4llm), LLM ingestion call, frontmatter merging, markdown output writing |
+| `index.py` | AGENTS.md generation -- collects frontmatter from all processed files, sends to LLM, writes index |
+| `manifest.py` | `.memento-state.json` read/write/update, file entry tracking, SHA-256 content hashing |
+| `watcher.py` | Watchdog-based file watcher with debounced queue, batch processing, retry queue, deletion detection |
 
-### Frontend: `frontend/`
+### How It Works
 
-React SPA built with Vite, TanStack Router, Tailwind CSS, and shadcn/ui. Built output served by the agent at `/`.
+1. **File watching** -- uses the `watchdog` library with native OS event backends (inotify on Linux, FSEvents on macOS) and automatic polling fallback. The `watch` command starts a long-running observer.
 
-### MCP Server: `mcp_server.py`
+2. **Debounced queue** -- file events are collected into a `DebouncedQueue`. After 2 seconds of inactivity (no new events), the batch is processed. This handles both single-file drops and bulk drops efficiently.
 
-Thin wrapper exposing `query` and `list_datasources` MCP tools via HTTP/SSE. No direct DB access — delegates to the agent HTTP API.
+3. **Ingestion pipeline** (`ingest.py`) -- for each new file:
+   - Size guard: skip files exceeding `MAX_FILE_SIZE`
+   - Read content: text files read as UTF-8, PDFs converted via `pymupdf4llm`
+   - Existing frontmatter: if the file is already markdown with YAML frontmatter, existing fields are preserved and merged
+   - LLM call: restructures content into clean markdown with rich YAML frontmatter (title, tags, category, entities, importance, content_type, summary)
+   - Deterministic fields (`date_ingested`, `source`) are injected by code, not the LLM
+   - Output: original file is replaced with `.md` version; non-markdown originals are deleted
+   - Manifest updated with file entry and content hash
 
-### Multi-Datasource Model
+4. **AGENTS.md generation** (`index.py`) -- after each ingestion batch, `regenerate_index` collects frontmatter from all processed files and sends it to the LLM to produce a categorized index. Capped at ~150 lines; the LLM consolidates by merging related entries when over budget.
 
-- Root `inbox/` → `general` datasource → `databases/general.db`
-- `inbox/news/` → `news` datasource → `databases/news.db`
-- Each datasource is fully isolated (separate DB, separate watcher task, separate consolidation)
-- Datasources are discovered by scanning `inbox/` subdirectories on each poll cycle
+5. **State tracking** -- each watched directory (silo) has a `.memento-state.json` manifest tracking all processed files, content hashes, and last index regeneration time. Files in the manifest are never re-ingested, even if edited (user edits are sacred).
 
-### Agent Hierarchy (Google ADK)
+6. **Deletion detection** -- when a file is removed, the watcher updates the manifest and triggers AGENTS.md regeneration.
 
-`memory_orchestrator` (root) routes to three sub-agents per datasource:
-- `ingest_agent` — processes new content into structured memories via `store_memory`
-- `consolidate_agent` — reads unconsolidated memories and finds connections via `store_consolidation`
-- `query_agent` — answers questions by reading all memories and consolidation history
+7. **Retry logic** -- LLM failures place files in an in-memory retry queue. The daemon retries periodically. On restart, unprocessed files are re-detected since they were never added to the manifest.
 
-Agents are built per-datasource with closures binding the `datasource` parameter to each tool function.
+### Inbox Silos
 
-### SQLite Schema (per datasource)
+Each watched directory is an independent silo with its own `AGENTS.md` and `.memento-state.json`. Subdirectories within a silo are **not** separate silos -- they belong to the parent. When watching multiple directories, each is processed independently with no cross-pollination.
 
-Three tables in `databases/<name>.db`:
-- `memories` — stores each ingested item with summary, entities (JSON), topics (JSON), connections (JSON), importance score, and a `consolidated` flag
-- `consolidations` — stores cross-memory insights with source_ids (JSON) pointing back to memories
-- `processed_files` — tracks which inbox files have already been ingested (by path)
+### Supported File Types
 
-### Async Concurrency
+- **Text files**: `.txt`, `.md`, `.csv`, `.json`, `.html`, `.xml`, `.yaml`, `.yml`, `.toml`, `.rst`, `.log`, plus common source code extensions (`.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.c`, `.cpp`, `.sh`, `.sql`, etc.)
+- **PDF files**: text extracted via pymupdf4llm
+- All other binary formats are skipped
 
-`main_async` runs two top-level tasks via `asyncio.gather`:
-1. `watcher_manager` — every 30s, rescans datasources and manages per-datasource watcher tasks
-2. `consolidation_loop` — on each interval, consolidates per-datasource if ≥2 unconsolidated memories exist
+### Dependencies
 
-Plus the aiohttp web server.
-
-### Multimodal Ingestion
-
-Text files are read as strings. Media files (images, audio, video, PDF) are sent as raw bytes with MIME type using `types.Part.from_bytes`. Files >20MB are skipped. The web UI uploads files via `POST /api/upload/<datasource>`, which writes them to the inbox directory for the watcher to pick up.
+| Package | Purpose |
+|---|---|
+| `litellm` | Multi-provider LLM completion calls |
+| `watchdog` | Filesystem event monitoring |
+| `pymupdf` / `pymupdf4llm` | PDF text extraction |
+| `pyyaml` | YAML frontmatter parsing and writing |
+| `click` | CLI framework |
